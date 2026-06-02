@@ -1,0 +1,396 @@
+# ==============================================================================
+# companies.txt — ATS Detector Input for jobradar
+# Personalized for: Backend / Fullstack / DevOps / IT roles
+# India-based + India-hiring remotes | Priority: Fintech > Backend > Fullstack > DevOps > IT
+# ==============================================================================
+# FORMAT: Plain company names, one per line. Comments (#) are ignored by the detector.
+# Total: ~200 companies across 6 tiers
+# ==============================================================================
+
+
+# ==============================================================================
+# TIER 1 — INDIAN FINTECH (Payments, Banking, Lending, Investing, Insurance)
+# Highest priority. These are the companies most likely to have backend roles
+# that directly match payment systems, APIs, distributed systems experience.
+# ==============================================================================
+
+Razorpay
+PhonePe
+Juspay
+Cashfree Payments
+Setu
+BharatPe
+Paytm
+CRED
+Zerodha
+Groww
+Upstox
+INDmoney
+Smallcase
+Fi Money
+Niyo
+Freo
+OneCard
+Slice
+Open Financial Technologies
+Navi Technologies
+Perfios
+HighRadius
+Pine Labs
+PayU India
+Simpl
+Khatabook
+OkCredit
+EnKash
+Karbon Card
+RazorpayX
+Signzy
+Digio
+Gridlines
+Decentro
+Finvu
+Sahamati
+FinBox
+Progcap
+Lendingkart
+Capital Float
+KreditBee
+MoneyTap
+Rupeek
+Indifi Technologies
+ZestMoney
+EarlySalary
+Stashfin
+Axio
+Recur Club
+Yubi
+Credgenics
+Yesbank Technology
+Acko Insurance
+Digit Insurance
+Coverfox
+Turtlemint
+PolicyBazaar
+Ditto Insurance
+Loop Health
+Nova Benefits
+Plum Benefits
+Onsurity
+CoinDCX
+CoinSwitch
+WazirX
+Mudrex
+Biconomy
+Polygon (MATIC)
+Vauld
+Paysign
+
+
+# ==============================================================================
+# TIER 2 — INDIAN PRODUCT COMPANIES (Strong Backend / API / Platform Teams)
+# Consumer internet unicorns and product companies with large eng orgs.
+# Backend, infra, platform, and data engineering roles are constant here.
+# ==============================================================================
+
+Swiggy
+Zomato
+Meesho
+Flipkart
+Myntra
+Nykaa
+Urban Company
+Lenskart
+Ola
+Rapido
+Porter
+Delhivery
+Shiprocket
+Shadowfax
+BlackBuck
+Ninjacart
+Jumbotail
+Udaan
+Moglix
+OfBusiness
+HealthifyMe
+Practo
+PharmEasy
+1mg
+Mfine
+Innovaccer
+Pristyn Care
+Cult.fit
+Cure.fit
+ShareChat
+Moj
+Dailyhunt
+Josh
+Lokal
+Glance
+InMobi
+mCaffeine
+Purplle
+Mamaearth
+Fashinza
+Spinny
+Cars24
+CarDekho
+Droom
+OYO Rooms
+Treebo Hotels
+RateGain
+Zostel
+MakeMyTrip
+ixigo
+Yatra
+Cleartrip
+Ather Energy
+Ola Electric
+Simple Energy
+Bounce
+Yulu
+BluSmart
+
+
+# ==============================================================================
+# TIER 3 — INDIAN B2B SAAS & DEVTOOLS (Backend/Fullstack/DevOps heavy)
+# These companies build developer-facing products — very high backend signal.
+# Excellent for Go, Python, Node.js, distributed systems, infra roles.
+# ==============================================================================
+
+Freshworks
+Zoho Corporation
+Postman
+BrowserStack
+Chargebee
+Druva
+Icertis
+Whatfix
+Zenoti
+MindTickle
+Sprinklr
+Hasura
+Appsmith
+Requestly
+DronaHQ
+Clarisights
+Suprsend
+Plivo
+Exotel
+Kaleyra
+Route Mobile
+Gupshup
+Yellow.ai
+Haptik
+Verloop
+Uniphore
+Darwinbox
+Keka HR
+greytHR
+Razorpay Payroll
+HRMantra
+Kredily
+Springworks
+Leadsquared
+CleverTap
+WebEngage
+MoEngage
+Netcore Cloud
+Wigzo
+Zarget
+VWO (Wingify)
+Helpshift
+Freshdesk
+Zoho Desk
+Interakt
+DelightChat
+Limechat
+Tidio
+Eka Software
+Facilio
+Netmeds Technology
+Kissflow
+ProcessMaker
+Kissflow Procurement
+Eqvista
+Paperflite
+Vymo
+Kapture CRM
+Salesken
+Slintel
+Toplyne
+Factors.ai
+Peoplebox
+Betterplace
+Apna
+Internshala
+iMocha
+Mercer Mettl
+HackerEarth
+HackerRank
+Interview Mocha
+Unstop
+Skillate
+Hirist
+Cutshort
+Belong
+
+
+# ==============================================================================
+# TIER 4 — GLOBAL COMPANIES WITH INDIA ENGINEERING OFFICES
+# These have significant India teams and hire locally in Bangalore/Hyderabad.
+# Not purely remote — but they hire from India extensively.
+# ==============================================================================
+
+Atlassian
+Salesforce India
+Adobe India
+Microsoft India
+Google India
+Amazon India
+Meta India
+Apple India
+IBM India
+Cisco India
+VMware India
+Nutanix
+ServiceNow India
+Workday India
+Palo Alto Networks India
+Zscaler India
+Cloudflare
+Stripe India
+Twilio
+MongoDB India
+Elastic India
+Confluent
+Databricks India
+HashiCorp
+Grafana Labs
+Datadog
+New Relic
+Sumo Logic
+PagerDuty
+OpsRamp
+Cribl
+Harness
+Snyk
+JFrog
+Mend (WhiteSource)
+Lacework
+Wiz
+Orca Security
+GitLab India
+GitHub India
+CircleCI
+Codefresh
+Buildkite
+Linear
+Notion
+Airtable
+Figma India
+Canva India
+Miro India
+Loom
+Grammarly
+Duolingo India
+Coursera India
+Udemy India
+
+
+# ==============================================================================
+# TIER 5 — FULLY REMOTE-FIRST COMPANIES (Hire globally, India-friendly timezone)
+# These companies explicitly hire from India with no office requirement.
+# Strong DevOps, backend, fullstack signal.
+# ==============================================================================
+
+GitLab
+Automattic
+Canonical (Ubuntu)
+Zapier
+Buffer
+Doist
+Basecamp
+Toggl
+Hotjar
+Whereby
+Remotecom (Remote.com)
+Deel
+Oyster HR
+Multiplier
+Darwinbox
+WorkIndia
+Turing
+Toptal
+Andela
+Upwork
+100ms
+Hasura (Remote)
+Supabase
+PlanetScale
+Railway
+Render
+Fly.io
+Cal.com
+Documenso
+Formbricks
+Infisical
+Novu
+Trigger.dev
+Dub
+OpenStatus
+Unkey
+Mintlify
+Resend
+Loops
+Clerk
+Stytch
+WorkOS
+Permit.io
+Cerbos
+
+
+# ==============================================================================
+# TIER 6 — EDTECH / GAMING / MEDIA (IT-adjacent, strong backend needs)
+# These have real backend/infra engineering — game servers, streaming, etc.
+# Lower fintech signal but strong backend/fullstack hiring.
+# ==============================================================================
+
+Unacademy
+PhysicsWallah
+upGrad
+Eruditus
+Emeritus
+BYJU'S
+Vedantu
+Scaler Academy
+Coding Ninjas
+Newton School
+Masai School
+Sunstone
+Simplilearn
+Great Learning
+Testbook
+Adda247
+Allen Digital
+Classplus
+Teachmint
+FrontRow
+Dream11
+Games24x7
+Mobile Premier League (MPL)
+WinZO Games
+Nazara Technologies
+JetSynthesys
+Awadh
+Rooter
+Loco
+Stage OTT
+Jio Platforms
+JioCinema
+HotStar (Disney+)
+SonyLIV Tech
+MX Player Tech
+Dailymotion India
+Koo
+Sharechat Engineering
