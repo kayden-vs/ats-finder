@@ -98,7 +98,19 @@ def generate_slugs(company_name: str) -> list[str]:
 
 
 def careers_url(ats: str, slug: str) -> str:
-    """Return the canonical careers page URL for a given ATS + slug."""
+    """Return the canonical careers page URL for a given ATS + slug.
+
+    For Workday, ``slug`` is the composite key ``tenant|wd_server|site``
+    (e.g. ``adobe|wd5|external_experienced``) that probe_workday() stores.
+    It is split here to reconstruct the canonical tenant portal URL.
+    """
+    if ats == "workday":
+        parts = slug.split("|")
+        if len(parts) == 3:
+            tenant, wd_server, site = parts
+            return f"https://{tenant}.{wd_server}.myworkdayjobs.com/{site}"
+        return ""
+
     _urls = {
         "greenhouse":       f"https://job-boards.greenhouse.io/{slug}",
         "lever":            f"https://jobs.lever.co/{slug}",
@@ -109,7 +121,5 @@ def careers_url(ats: str, slug: str) -> str:
         "bamboohr":         f"https://{slug}.bamboohr.com/careers",
         "recruitee":        f"https://{slug}.recruitee.com/",
         "personio":         f"https://{slug}.jobs.personio.de/",
-        "teamtailor":       f"https://{slug}.teamtailor.com/",
-        "freshteam":        f"https://{slug}.freshteam.com/jobs",
     }
     return _urls.get(ats, "")

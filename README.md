@@ -20,8 +20,7 @@ plus a detailed CSV report.
 | 7 | **BambooHR** | JSON API | No |
 | 8 | **Recruitee** | JSON API | No |
 | 9 | **Personio** | XML feed | No |
-| 10 | **Teamtailor** | HTML detection | Yes (flagged in output) |
-| 11 | **Freshteam** | HTML detection | No (scrape-only) |
+| 10 | **Workday** | POST API (tenant+site required) | No |
 
 ---
 
@@ -29,11 +28,13 @@ plus a detailed CSV report.
 
 ```
 ats_finder/
-├── main.py          # CLI entrypoint
-├── detector.py      # Async ATS probing logic (one function per ATS)
-├── normalizer.py    # Slug-guessing from company names
-├── output.py        # YAML + CSV writer with incremental checkpointing
-├── companies.txt    # Sample input (20 Indian + 10 remote-first companies)
+├── main.py                # CLI entrypoint
+├── detector.py            # Async ATS probing logic (one function per ATS)
+├── normalizer.py          # Slug-guessing from company names
+├── output.py              # YAML + CSV writer with incremental checkpointing
+├── companies.txt          # Standard input (one company name per line)
+├── workday_companies.txt  # Workday-specific input (CompanyName|tenant|wd_server|site)
+├── discover_workday.py    # Auto-populate workday_companies.txt from companies.txt
 ├── requirements.txt
 └── README.md
 ```
@@ -83,6 +84,7 @@ python main.py --verbose
 | `--csv`, `-c` | `ats_report.csv` | CSV report path |
 | `--workers`, `-w` | `10` | Max concurrent companies processed at once |
 | `--skip-ats` | _(none)_ | Comma-separated ATS names to skip |
+| `--workday-input` | `workday_companies.txt` | Workday-specific input file (skipped if absent) |
 | `--dry-run` | `false` | Print probe plan, make no requests |
 | `--verbose`, `-v` | `false` | Enable DEBUG-level logging |
 
@@ -130,10 +132,6 @@ greenhouse:
 lever:
   - slug: freshworks
     name: Freshworks
-
-# Requires manual setup (no complete public API):
-# teamtailor: [BlaBlaCar] — needs per-company API key
-# freshteam: [Company X] — HTML scrape only — no public JSON API
 ```
 
 ---
@@ -172,6 +170,137 @@ Each ATS prober tries all candidates in order and stops at the first verified hi
 
 ---
 
+## Workday — why it's different
+
+Workday is structurally unlike every other supported ATS. Each company gets its
+own subdomain **and** its own data-centre number **and** its own site path:
+
+```
+https://{tenant}.wd{N}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
+```
+
+- `{tenant}` — the company's subdomain (e.g. `adobe`, `sec` for Samsung)
+- `{N}` — a data-centre number (`1`, `3`, `5`, `12` …) that varies per company
+  and **cannot be reliably guessed**
+- `{site}` — a site path name that also varies (e.g. `external_experienced`,
+  `Samsung_Careers`, `External`)
+
+Because neither the data-centre number nor the site name can be derived from a
+company name, the slug-guessing approach used for Greenhouse / Lever / Ashby /
+etc. **does not work** for Workday.
+
+Instead, the tool operates in **verification mode** for Workday: you supply the
+exact config, and the tool confirms it returns jobs via a POST request.
+
+### `workday_companies.txt` format
+
+One line per company, pipe-separated:
+
+```
+# CompanyName|tenant|wd_server|site
+Adobe|adobe|wd5|external_experienced
+Samsung|sec|wd3|Samsung_Careers
+Oracle|oracle|wd5|oracle-careers
+```
+
+- **CompanyName** — display name used in the YAML output
+- **tenant** — the subdomain (find it in the company's Workday careers URL)
+- **wd_server** — the data-centre identifier including the `wd` prefix (e.g. `wd5`)
+- **site** — the site path segment after the tenant in the URL
+
+Blank lines and lines starting with `#` are ignored.
+
+### Two-step workflow (recommended)
+
+Step 1 — **Discover**: find which companies in `companies.txt` are on Workday.
+
+```bash
+python discover_workday.py
+```
+
+This reads `companies.txt`, tries all slug variants against all known
+Workday data-centre numbers, extracts the site name from the redirect URL,
+verifies with a POST to the jobs endpoint, and appends confirmed entries to
+`workday_companies.txt`.
+
+Step 2 — **Verify + export**: run the main tool as usual.
+
+```bash
+python main.py
+```
+
+`main.py` reads `workday_companies.txt` (populated by step 1), calls
+`probe_workday()` to re-confirm and get a fresh job count, and writes the
+Workday section to `companies_found.yaml`.
+
+#### `discover_workday.py` CLI arguments
+
+| Argument | Default | Description |
+|---|---|---|
+| `--input`, `-i` | `companies.txt` | Company names to probe |
+| `--output`, `-o` | `workday_companies.txt` | File to append results to |
+| `--workers`, `-w` | `2` | Max concurrent HTTP requests (keep low — Akamai) |
+| `--delay` | `0.35` | Seconds to sleep between failed attempts |
+| `--dry-run` | `false` | Print probe plan, make no requests |
+| `--verbose`, `-v` | `false` | Enable DEBUG logging |
+
+> **Tip**: Companies already present in `workday_companies.txt` are skipped
+> automatically, so you can run this incrementally as you add new companies
+> to `companies.txt`.
+
+#### How discovery works
+
+```
+For each company:
+  For each slug candidate (up to 6, from normalizer.generate_slugs):
+    For each server in [wd1, wd3, wd5, wd12, wd13]:
+      GET https://{slug}.{server}.myworkdayjobs.com/  (follow redirects)
+        → Non-existent tenant: DNS NXDOMAIN < 50 ms  → next combo
+        → Valid tenant:        redirects to /{site}/  → extract site
+      POST .../wday/cxs/{slug}/{server}/{site}/jobs
+        → 0 jobs: continue trying
+        → N jobs: write CompanyName|slug|server|site → workday_companies.txt
+```
+
+Since DNS failures are near-instant, the typical case for a company that
+*is* on Workday is 3–10 probes before a hit. A company that's *not* on
+Workday exhausts all 30 combinations in ~10–20 seconds.
+
+### Running with Workday
+
+```bash
+# Run with default workday_companies.txt (silently skipped if absent)
+python main.py
+
+# Use a custom Workday file
+python main.py --workday-input my_workday.txt
+
+# Skip Workday probing entirely
+python main.py --skip-ats workday
+
+# Dry-run — shows both standard and Workday companies without making requests
+python main.py --dry-run
+```
+
+### Workday YAML output
+
+The Workday section uses `tenant` / `server` / `site` / `name` fields instead
+of a flat `slug` — matching the schema that jobradar's `companies.yaml` needs:
+
+```yaml
+workday:
+  - tenant: adobe
+    server: wd5
+    site: external_experienced
+    name: Adobe
+  - tenant: sec
+    server: wd3
+    site: Samsung_Careers
+    name: Samsung
+```
+
+---
+
 ## Architecture
 
 ```
@@ -189,9 +318,7 @@ main.py
        │         ├─ probe_rippling()
        │         ├─ probe_bamboohr()
        │         ├─ probe_recruitee()
-       │         ├─ probe_personio()
-       │         ├─ probe_teamtailor()
-       │         └─ probe_freshteam()
+       │         └─ probe_personio()
        └─ output.checkpoint()  every 10 companies  →  .yaml + .csv
 ```
 
@@ -222,11 +349,11 @@ Or paste the relevant sections manually — the format exactly matches jobradar'
 
 - **Workable rate-limits aggressively** (~100 requests / IP). Use `--skip-ats workable`
   if you're running the tool repeatedly in a short window.
-- **Teamtailor** entries in the YAML output are comments only — you'll need to obtain a
-  per-company API key from Teamtailor and add those entries manually.
-- **Freshteam** is detected via HTML only. There is no public JSON API; add these companies
-  to a custom scraper if needed.
 - **SmartRecruiters slugs are case-sensitive** and inconsistently formatted. The prober
   tries multiple casing variants automatically.
 - **Personio** tries both `.de` and `.com` TLDs.
+- **Workday** uses Akamai bot-management. The prober enforces a 1.5-second delay between
+  URL format attempts to reduce the chance of being blocked. If you get consistent misses
+  on companies you know are on Workday, try running with `--workers 1` and `--verbose` to
+  inspect the HTTP responses.
 - All errors are caught per-company — a network blip won't abort the entire run.

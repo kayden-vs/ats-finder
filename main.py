@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 from tqdm import tqdm
 
-from detector import probe_all, set_semaphore, _ALL_PROBERS
+from detector import probe_all, probe_workday, set_semaphore, _ALL_PROBERS
 from normalizer import generate_slugs
 from output import checkpoint, print_summary, write_csv, write_yaml
 
@@ -88,6 +88,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--workday-input",
+        default="workday_companies.txt",
+        metavar="FILE",
+        help=(
+            "Path to Workday-specific input file. "
+            "Each line: CompanyName|tenant|wd_server|site "
+            "(e.g. Adobe|adobe|wd5|external_experienced). "
+            "Skipped silently if the file does not exist."
+        ),
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would be probed without making any requests.",
@@ -114,16 +125,29 @@ async def run(
     workers: int,
     skip_ats: set[str],
     dry_run: bool,
+    workday_entries: list[dict] | None = None,
 ) -> list[dict]:
-    """Main async pipeline."""
+    """
+    Main async pipeline.
+
+    workday_entries: list of dicts with keys {company, tenant, wd_server, site}.
+    These are processed after the regular company list via probe_workday() directly,
+    bypassing slug-guessing and probe_all().
+    """
+    workday_entries = workday_entries or []
 
     if dry_run:
-        print(f"\nDry run — would probe {len(companies)} companies across "
+        print(f"\nDry run - would probe {len(companies)} companies across "
               f"{len(_ALL_PROBERS) - len(skip_ats)} ATS platforms:\n")
         for company in companies:
             slugs = generate_slugs(company)
-            print(f"  {company!r:30s} → slugs: {slugs[:3]}{'...' if len(slugs) > 3 else ''}")
+            print(f"  {company!r:30s} -> slugs: {slugs[:3]}{'...' if len(slugs) > 3 else ''}")
         print(f"\nSkipping: {', '.join(skip_ats) if skip_ats else 'none'}")
+        if workday_entries and "workday" not in skip_ats:
+            print(f"\nWorkday entries to verify ({len(workday_entries)}):")
+            for e in workday_entries:
+                print(f"  {e['company']!r:30s} -> tenant={e['tenant']}, "
+                      f"server={e['wd_server']}, site={e['site']}")
         return []
 
     # Set global semaphore based on worker count
@@ -134,13 +158,18 @@ async def run(
     # slug -> original company name mapping for YAML output
     slug_to_name: dict[str, str] = {}
 
+    total_companies = len(companies) + len(workday_entries)
     print(f"\nProbing {len(companies)} companies across "
-          f"{len(_ALL_PROBERS) - len(skip_ats)} ATS platforms...\n")
+          f"{len(_ALL_PROBERS) - len(skip_ats)} ATS platforms"
+          + (f" + {len(workday_entries)} Workday companies" if workday_entries else "")
+          + "...\n")
 
     start_total = time.monotonic()
 
     async with httpx.AsyncClient() as client:
-        # Process companies with bounded concurrency using a semaphore-guarded queue
+        # ----------------------------------------------------------------
+        # Regular companies (slug-guessing via probe_all)
+        # ----------------------------------------------------------------
         company_sem = asyncio.Semaphore(workers)
 
         async def process_company(company: str, pbar: tqdm) -> dict:
@@ -155,7 +184,7 @@ async def run(
                 pbar.update(1)
                 return result
 
-        with tqdm(total=len(companies), unit="co", ncols=80,
+        with tqdm(total=total_companies, unit="co", ncols=80,
                   bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} companies | {elapsed}") as pbar:
 
             tasks = [process_company(c, pbar) for c in companies]
@@ -171,7 +200,6 @@ async def run(
                 for r in chunk_results:
                     if isinstance(r, Exception):
                         logger.error("Company probe raised unexpectedly: %s", r)
-                        # Manufacture an error entry
                         all_results.append({
                             "company": "unknown",
                             "ats": None,
@@ -198,6 +226,52 @@ async def run(
                     min(i + chunk_size, len(companies)),
                     len(companies),
                 )
+
+            # ----------------------------------------------------------------
+            # Workday entries (verification mode — called directly, no slug-guessing)
+            # ----------------------------------------------------------------
+            if workday_entries and "workday" not in skip_ats:
+                logger.info("Processing %d Workday entries...", len(workday_entries))
+                for entry in workday_entries:
+                    company = entry["company"]
+                    config = {
+                        "tenant":    entry["tenant"],
+                        "wd_server": entry["wd_server"],
+                        "site":      entry["site"],
+                    }
+                    logger.debug("Workday verify: %r -> %s", company, config)
+                    try:
+                        result = await probe_workday(config, client)
+                    except Exception as exc:
+                        logger.error("probe_workday raised for %r: %s", company, exc)
+                        result = None
+
+                    if result is None:
+                        result = {
+                            "ats": None,
+                            "slug": None,
+                            "jobs_found": 0,
+                            "careers_url": "",
+                            "probe_time_ms": 0,
+                            "status": "not_found",
+                        }
+
+                    result["company"] = company
+                    # Workday results carry tenant/wd_server/site; track name for YAML
+                    if result.get("status") == "found":
+                        slug_to_name[result["slug"]] = company
+                    all_results.append(result)
+                    pbar.update(1)
+
+                # Checkpoint after all Workday entries
+                checkpoint(
+                    output_yaml,
+                    output_csv,
+                    all_results,
+                    slug_to_name,
+                    first_batch=first_checkpoint,
+                )
+                first_checkpoint = False
 
     elapsed = time.monotonic() - start_total
     logger.info("Total probe time: %.1fs", elapsed)
@@ -241,6 +315,41 @@ def main() -> int:
     output_yaml = Path(args.output)
     output_csv = Path(args.csv)
 
+    # Read Workday-specific input (optional; skipped if file does not exist)
+    workday_entries: list[dict] = []
+    workday_input_path = Path(args.workday_input)
+    if workday_input_path.exists():
+        raw_wd = workday_input_path.read_text(encoding="utf-8").splitlines()
+        for lineno, line in enumerate(raw_wd, start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("|")
+            if len(parts) != 4:
+                print(
+                    f"Warning: workday_companies.txt line {lineno} has wrong format "
+                    f"(expected CompanyName|tenant|wd_server|site): {line!r}",
+                    file=sys.stderr,
+                )
+                continue
+            company_name, tenant, wd_server, site = (p.strip() for p in parts)
+            if not (company_name and tenant and wd_server and site):
+                print(
+                    f"Warning: workday_companies.txt line {lineno} has empty field: {line!r}",
+                    file=sys.stderr,
+                )
+                continue
+            workday_entries.append({
+                "company":   company_name,
+                "tenant":    tenant,
+                "wd_server": wd_server,
+                "site":      site,
+            })
+        if workday_entries:
+            logger.info("Loaded %d Workday entries from %s", len(workday_entries), workday_input_path)
+    else:
+        logger.debug("Workday input file not found: %s (skipping)", workday_input_path)
+
     # Run the async pipeline
     try:
         all_results = asyncio.run(
@@ -251,6 +360,7 @@ def main() -> int:
                 workers=args.workers,
                 skip_ats=skip_ats,
                 dry_run=args.dry_run,
+                workday_entries=workday_entries,
             )
         )
     except KeyboardInterrupt:

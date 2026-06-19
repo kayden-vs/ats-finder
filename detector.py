@@ -10,7 +10,14 @@ Each probe_<ats>() function:
 
 Priority order (defined in probe_all()):
   Greenhouse → Lever → Ashby → Workable → SmartRecruiters →
-  Rippling → BambooHR → Recruitee → Personio → Teamtailor → Freshteam
+  Rippling → BambooHR → Recruitee → Personio → Workday
+
+Note on Workday:
+  Workday tenants each have their own subdomain + data-centre number + site path
+  (e.g. adobe.wd5.myworkdayjobs.com/external_experienced).  These three values
+  cannot be guessed from a company name, so probe_workday() works in *verification*
+  mode: it accepts a pre-built config dict instead of slug candidates and is called
+  directly from main.py for entries read from workday_companies.txt.
 """
 
 from __future__ import annotations
@@ -47,6 +54,9 @@ _semaphore: asyncio.Semaphore = asyncio.Semaphore(10)
 
 # Workable gets its own mutex (1 at a time + 3s sleep)
 _workable_lock: asyncio.Lock = asyncio.Lock()
+
+# Workday gets its own lock — Akamai bot management is sensitive to rapid probing
+_workday_lock: asyncio.Lock = asyncio.Lock()
 
 # 100 ms inter-request delay per domain
 _domain_last_request: dict[str, float] = {}
@@ -385,59 +395,89 @@ async def probe_personio(slugs: list[str], client: httpx.AsyncClient) -> Optiona
 
 
 # ---------------------------------------------------------------------------
-# 10. Teamtailor  (HTML detection only — no API key available)
+# 10. Workday  (POST API; verification mode — requires explicit tenant+site config)
 # ---------------------------------------------------------------------------
 
-async def probe_teamtailor(slugs: list[str], client: httpx.AsyncClient) -> Optional[dict]:
-    for slug in slugs:
-        t0 = time.monotonic()
-        domain = f"{slug}.teamtailor.com"
-        url = f"https://{slug}.teamtailor.com/"
-        html = await _get_html(client, url, domain=domain)
-        if html and "teamtailor-cdn" in html.lower():
-            elapsed = (time.monotonic() - t0) * 1000
-            logger.info("Teamtailor hit (HTML): slug=%s", slug)
-            # Teamtailor requires a per-company API key — flag accordingly
-            return {
-                "ats": "teamtailor",
-                "slug": slug,
-                "jobs_found": -1,  # unknown without API key
-                "careers_url": careers_url("teamtailor", slug),
-                "probe_time_ms": round(elapsed),
-                "status": "requires_key",
-                "requires_key": True,
-            }
+async def probe_workday(
+    config: dict,
+    client: httpx.AsyncClient,
+) -> Optional[dict]:
+    """
+    Verify a Workday tenant by POSTing to its jobs listing endpoint.
+
+    Unlike all other probers, this does NOT accept slug candidates — Workday
+    tenants cannot be guessed from a company name.  Instead, `config` must be
+    a dict with keys:
+        tenant    – the company's Workday subdomain, e.g. "adobe"
+        wd_server – the data-centre identifier, e.g. "wd5"
+        site      – the site path name, e.g. "external_experienced"
+
+    Two URL formats are tried in order:
+        1. https://{tenant}.{wd_server}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
+        2. https://jobs.myworkdaysite.com/recruiting/{tenant}/{site}/jobs
+
+    A success is a JSON response that is a dict containing either:
+        - a non-empty "jobPostings" list, or
+        - a "total" value greater than zero.
+
+    Returns a result dict with ats="workday" on success, None on miss.
+    """
+    tenant = config.get("tenant", "")
+    wd_server = config.get("wd_server", "")
+    site = config.get("site", "")
+
+    if not (tenant and wd_server and site):
+        logger.debug("probe_workday: incomplete config %r, skipping", config)
+        return None
+
+    payload = {"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": ""}
+
+    url_formats = [
+        (
+            f"{tenant}.{wd_server}.myworkdayjobs.com",
+            f"https://{tenant}.{wd_server}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs",
+        ),
+        (
+            "jobs.myworkdaysite.com",
+            f"https://jobs.myworkdaysite.com/recruiting/{tenant}/{site}/jobs",
+        ),
+    ]
+
+    async with _workday_lock:
+        for domain, url in url_formats:
+            t0 = time.monotonic()
+            logger.debug("Workday probe: %s", url)
+            data = await _post_json(client, url, domain=domain, payload=payload)
+
+            if isinstance(data, dict):
+                postings = data.get("jobPostings", [])
+                total = data.get("total", 0)
+                if (isinstance(postings, list) and len(postings) > 0) or total > 0:
+                    elapsed = (time.monotonic() - t0) * 1000
+                    jobs = len(postings) if postings else total
+                    logger.info(
+                        "Workday hit: tenant=%s, server=%s, site=%s, jobs=%d",
+                        tenant, wd_server, site, jobs,
+                    )
+                    # Careers URL: the public-facing tenant portal
+                    careers = f"https://{tenant}.{wd_server}.myworkdayjobs.com/{site}"
+                    return {
+                        "ats": "workday",
+                        "slug": f"{tenant}|{wd_server}|{site}",  # composite key for CSV
+                        "tenant": tenant,
+                        "wd_server": wd_server,
+                        "site": site,
+                        "jobs_found": int(jobs),
+                        "careers_url": careers,
+                        "probe_time_ms": round(elapsed),
+                        "status": "found",
+                    }
+
+            # Delay between attempts — Akamai bot management is sensitive to rapid requests
+            await asyncio.sleep(1.5)
+
     return None
 
-
-# ---------------------------------------------------------------------------
-# 11. Freshteam  (HTML detection only — no public JSON API)
-# ---------------------------------------------------------------------------
-
-async def probe_freshteam(slugs: list[str], client: httpx.AsyncClient) -> Optional[dict]:
-    for slug in slugs:
-        t0 = time.monotonic()
-        domain = f"{slug}.freshteam.com"
-        url = f"https://{slug}.freshteam.com/jobs"
-        html = await _get_html(client, url, domain=domain)
-        if html and ("freshteam.com/jobs" in html or "freshteam" in html.lower()):
-            elapsed = (time.monotonic() - t0) * 1000
-            logger.info("Freshteam hit (HTML): slug=%s", slug)
-            return {
-                "ats": "freshteam",
-                "slug": slug,
-                "jobs_found": -1,
-                "careers_url": careers_url("freshteam", slug),
-                "probe_time_ms": round(elapsed),
-                "status": "found",
-                "scrape_only": True,
-            }
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
 
 # Registry of all probers in priority order
 _ALL_PROBERS = {
@@ -450,8 +490,7 @@ _ALL_PROBERS = {
     "bamboohr":         probe_bamboohr,
     "recruitee":        probe_recruitee,
     "personio":         probe_personio,
-    "teamtailor":       probe_teamtailor,
-    "freshteam":        probe_freshteam,
+    "workday":          probe_workday,   # verification-mode only; called directly from main.py
 }
 
 

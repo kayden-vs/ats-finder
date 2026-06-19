@@ -1,0 +1,10 @@
+# Workday companies — one per line, format: CompanyName|tenant|wd_server|site
+Proofpoint|proofpoint|wd5|proofpointcareers
+Adobe|adobe|wd5|external_experienced
+Samsung|sec|wd3|Samsung_Careers
+Oracle|oracle|wd5|oracle-careers
+BrowserStack|browserstack|wd3|External
+Sprinklr|sprinklr|wd1|Careers
+Adobe India|adobe|wd5|external_experienced
+Cisco India|cisco|wd5|cisco_careers
+Workday India|workday|wd5|workday

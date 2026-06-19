@@ -16,7 +16,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ATS platforms that produce standard slug-based entries in YAML
+# ATS platforms that produce standard slug-based entries in YAML.
+# Workday is intentionally excluded here — it gets its own structured block below.
 _STANDARD_ATS = {
     "greenhouse",
     "lever",
@@ -29,11 +30,6 @@ _STANDARD_ATS = {
     "personio",
 }
 
-# ATS platforms that need special handling / manual setup
-_SPECIAL_ATS = {
-    "teamtailor": "needs per-company API key",
-    "freshteam":  "HTML scrape only — no public JSON API",
-}
 
 CSV_COLUMNS = [
     "company_name",
@@ -54,7 +50,7 @@ def _group_by_ats(results: list[dict]) -> dict[str, list[dict]]:
     """Group found results by ATS name."""
     grouped: dict[str, list[dict]] = {}
     for r in results:
-        if r.get("status") not in ("found", "requires_key"):
+        if r.get("status") != "found":
             continue
         ats = r.get("ats")
         if not ats:
@@ -88,29 +84,24 @@ def build_yaml_block(
     Build a YAML string that is directly appendable to jobradar's companies.yaml.
 
     company_names: mapping from slug -> original company name (for the `name:` field).
+
+    Standard ATS platforms produce entries with `slug` + `name` fields.
+    Workday produces a separate block with `tenant`, `server`, `site`, and `name`
+    fields — because jobradar's companies.yaml schema for Workday differs from the
+    flat slug-based schema used by every other ATS.
     """
     grouped = _group_by_ats(all_results)
 
-    # Separate standard vs special
-    standard: dict[str, list[dict]] = {}
-    special: dict[str, list[dict]] = {}
-
-    for ats, entries in grouped.items():
-        if ats in _SPECIAL_ATS:
-            special[ats] = entries
-        else:
-            standard[ats] = entries
-
-    total_found = sum(len(v) for v in standard.values())
-    ats_breakdown = {ats: len(v) for ats, v in standard.items()}
+    total_found = sum(len(v) for v in grouped.values())
+    ats_breakdown = {ats: len(v) for ats, v in grouped.items()}
 
     buf = io.StringIO()
     buf.write(_yaml_header(total_found, ats_breakdown))
     buf.write("\n")
 
-    # Standard ATS entries
+    # Standard ATS entries (slug + name)
     for ats in _STANDARD_ATS:
-        entries = standard.get(ats)
+        entries = grouped.get(ats)
         if not entries:
             continue
         buf.write(f"{ats}:\n")
@@ -121,13 +112,26 @@ def build_yaml_block(
             buf.write(f"    name: {name}\n")
         buf.write("\n")
 
-    # Special ATS — output as YAML comments
-    if special:
-        buf.write("# Requires manual setup (no complete public API):\n")
-        for ats, entries in special.items():
-            note = _SPECIAL_ATS[ats]
-            names = ", ".join(company_names.get(e["slug"], e["slug"]) for e in entries)
-            buf.write(f"# {ats}: [{names}] — {note}\n")
+    # Workday block — structured with tenant / server / site / name
+    workday_entries = grouped.get("workday")
+    if workday_entries:
+        buf.write("workday:\n")
+        for entry in workday_entries:
+            tenant    = entry.get("tenant", "")
+            wd_server = entry.get("wd_server", "")
+            site      = entry.get("site", "")
+            # Derive display name: prefer company_names lookup via composite slug key,
+            # then fall back to the 'company' field stored on the result dict itself.
+            composite_slug = entry.get("slug", "")
+            name = (
+                company_names.get(composite_slug)
+                or entry.get("company", composite_slug)
+            )
+            buf.write(f"  - tenant: {tenant}\n")
+            buf.write(f"    server: {wd_server}\n")
+            buf.write(f"    site: {site}\n")
+            buf.write(f"    name: {name}\n")
+        buf.write("\n")
 
     return buf.getvalue()
 
@@ -213,18 +217,17 @@ def checkpoint(
 
 def print_summary(all_results: list[dict]) -> None:
     found = [r for r in all_results if r.get("status") == "found"]
-    requires_key = [r for r in all_results if r.get("status") == "requires_key"]
     not_found = [r for r in all_results if r.get("status") == "not_found"]
     errors = [r for r in all_results if r.get("status") == "error"]
 
     ats_counts: dict[str, int] = {}
-    for r in found + requires_key:
+    for r in found:
         ats = r.get("ats")
         if ats:
             ats_counts[ats] = ats_counts.get(ats, 0) + 1
 
     print("\nResults:")
-    print(f"  ✅ Found:      {len(found) + len(requires_key)} companies")
+    print(f"  ✅ Found:      {len(found)} companies")
     print(f"  ❌ Not found:  {len(not_found)} companies")
     print(f"  ⚠️  Errors:     {len(errors)} companies (see CSV report)")
 
